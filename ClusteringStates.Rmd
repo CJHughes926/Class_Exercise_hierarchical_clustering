@@ -1,0 +1,264 @@
+title: "Clustering_Env"
+author: "Connor Hughes"
+date: "2023-03-29"
+output: html_document
+---
+
+
+Load required packages
+```{r Load Packages, warning=FALSE}
+# Check if packages are installed, if not, install them
+packages <- c("dplyr", "raster", "ggplot2", "mapdata", "cluster", "factoextra", "dendextend", "reshape2", "cowplot")
+for (package in packages) {
+  if (!require(package, character.only = TRUE)) {
+    install.packages(package)
+    library(package, character.only = TRUE)
+  }
+}
+
+# Load the packages
+library(dplyr)      # for data manipulation
+library(raster)     # for handling spatial data
+library(ggplot2)    # for data visualization
+library(mapdata)    # for generating maps
+library(cluster)    # for clustering analysis
+library(factoextra) # for clustering visualizations
+library(dendextend) # for modifying dendrograms
+library(reshape2)   # for data transformation
+library(cowplot)    # for plotting multiple plots together
+
+```
+
+Data Preparation
+Load data and subset only complete cases
+```{r Data Preparation}
+#Clear environment 
+rm(list=ls())
+
+#Choose a state and type it below!
+
+State <- #
+
+My_State <- read.csv(paste0("./SamplePts/",State,"_Points.csv")) # load data from CSV file, choose your state here
+My_State <- subset(My_State, complete.cases(My_State) == T) # subset only complete cases (rows without any missing values)
+My_State$Ecoregion <- My_State$na_l2name # create a new column "Ecoregion" and assign values from "na_l2name" column
+```
+
+
+Visualize the Distribution of your Sampled Points
+
+```{r Visualize the Distribution}
+#Load in a map of the US
+us_map <- map_data("state")
+
+#Plot the sampled points on this map of the US
+ggplot() +
+  geom_polygon(data = us_map, aes(x = long, y = lat, group = group), 
+               fill = "white", color = "black") +
+  geom_point(data = My_State, aes(x = Longitude, y = Latitude), 
+             color = "firebrick", size = .5, stroke = 1.5) +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_quickmap(xlim = c(min(My_State$Longitude)-.5, max(My_State$Longitude)+.5), 
+                  ylim = c(min(My_State$Latitude)-.5, max(My_State$Latitude))+.5) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "none")
+```
+
+Visualize the Distribution of your points in Envrionmental Space
+
+```{r E Space}
+# Plot Bio 1 (Annual Temprature) and Bio 12 (Annual Precipitation) of these points
+ggplot(My_State, aes(My_State$bio01, My_State$bio12)) +
+  geom_point() +
+  labs(y = "Precipitation (mm)", x = "Temprature (C)")
+```
+Isolate and Scale your Environmental Variables
+
+```{r Isolate and Scale}
+#Read in collumn names of 'My State'
+colnames(My_State)
+#Select only those we're interested in clustering by, in this case Bio01 and Bio12
+My_State_bios <- dplyr::select(My_State, bio01, bio12)
+#Scale these variables so that they have comparable values
+My_State_scaled <- scale(My_State_bios)
+```
+Test which linkage method is best for your data set 
+
+```{r Linkage Method}
+#define linkage methods
+m <- c( "average", "single", "complete", "ward")
+names(m) <- c( "average", "single", "complete", "ward")
+
+#function to compute agglomerative coefficient (How strong are your clusters)
+ac <- function(x) {
+  agnes(My_State_scaled, method = x)$ac
+}
+
+#calculate agglomerative coefficient for each clustering linkage method
+sapply(m, ac)
+```
+
+Choose an number of clusters for your data set - use these tests to help you do so
+
+```{r Cluster Number, message=F, warning=F}
+### Elbow method
+fviz_nbclust(My_State_scaled, FUN = hcut, method = "wss", print.summary = T)
+
+### Silhouette Method
+fviz_nbclust(My_State_scaled, FUN = hcut, method = "silhouette", print.summary = T)
+```
+You can also visually assess your clusters to choose the number of groups you'd like to naturally create
+```{r Test Dendrogram}
+#compute distance matrix
+d <- dist(My_State_scaled, method = "euclidean")
+
+#perform hierarchical clustering using the method you previously selected
+method <- "ward.D2"
+prelim_clust <- hclust(d, method = method)
+
+avg_dend_obj <- as.dendrogram(prelim_clust, labs = F)  %>% set("labels", "")
+plot(avg_dend_obj)
+```
+Now, create your clusters
+```{r Full Dendrogram}
+#compute distance matrix
+d <- dist(My_State_scaled, method = "euclidean")
+
+#perform hierarchical clustering using the method you previously selected
+method <- "ward.D2"
+final_clust <- hclust(d, method = method)
+
+#cut the dendrogram into the apropriate number of clusters you previously decided (Based off the previous two code blocks)
+k = #
+groups <- cutree(final_clust, k=k)
+
+#Plot your dendrogram!
+avg_col_dend <- color_branches(final_clust, k = k)  %>% set("labels", "")
+plot(avg_col_dend)
+```
+Visualize some of the main differences between your groups
+```{r Visualize Cluster}
+#Append your new groupings to the primary data frame
+My_State_scaled <- as.data.frame(My_State_scaled)
+My_State_scaled$Cluster <- groups
+My_State$Cluster <- groups
+
+#Plot your clusters in environmental space
+ggplot(My_State_scaled, aes(bio01, bio12, color = as.character(Cluster))) +
+  geom_point() +
+  labs(x = "Precipitation", y = "Temprature", color = "Cluster")
+
+#Flatten your dataframe to allow the creation of the next plot
+Cluster_Info <- melt(My_State_scaled, by=list(cluster=My_State_scaled$Cluster), id.vars = "Cluster")
+
+#Make a bar plot visualizing the differences in your clusters
+ggplot(Cluster_Info, aes(x = variable, y = as.numeric(value), fill = as.character(Cluster))) +
+  geom_boxplot() +
+  labs(x = "Bioclim Variable", y = "Value (SD from Mean)", fill = "Cluster") +
+  coord_flip()
+```
+Plot your clusters in Geographic Space
+```{r Plot Clusters in G Space}
+ggplot() +
+  geom_polygon(data = us_map, aes(x = long, y = lat, group = group), 
+               fill = "white", color = "black") +
+  geom_point(data = My_State, aes(x = Longitude, y = Latitude, fill = as.character(Cluster)), size = 3, shape = 21, stroke = 1.5) +
+  labs( 
+       x = "Longitude", y = "Latitude", fill = "Cluster") +
+  coord_quickmap(xlim = c(min(My_State$Longitude)-.5, max(My_State$Longitude)+.5), 
+                  ylim = c(min(My_State$Latitude)-.5, max(My_State$Latitude))+.5) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "bottom")
+```
+Nice work! You just designated regions of this state based on environmental variables.
+
+~~~
+
+States already have some system of labeling different environmental provinces- these are more complex and often take into account more than just abiotic factors, but are a similar idea. How does our clustering match up against the states ecoregions? 
+
+
+Lets see!
+```{r Plot Ecoregions}
+#Append ecoregion to your dataframe
+My_State_scaled$Ecoregion <- My_State$Ecoregion
+My_State$Cluster <- groups
+
+#Plot the ecoregions in the same environmental space we used to create our clusters
+ggplot(My_State_scaled, aes(bio01, bio12, color = as.character(Ecoregion))) +
+  geom_point() +
+  labs(x = "Precipitation", y = "Temprature", color = "Ecoregion")
+
+#Make a map of the ecoregions by point
+ggplot() +
+  geom_polygon(data = us_map, aes(x = long, y = lat, group = group), 
+               fill = "white", color = "black") +
+  geom_point(data = My_State, aes(x = Longitude, y = Latitude, fill = as.factor(Ecoregion)), size = 3, shape = 21, stroke = 1.5) +
+  labs( 
+       x = "Longitude", y = "Latitude", fill = "Ecoregion") +
+  coord_quickmap(xlim = c(min(My_State$Longitude)-.5, max(My_State$Longitude)+.5), 
+                  ylim = c(min(My_State$Latitude)-.5, max(My_State$Latitude))+.5) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "bottom",
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 4))
+
+```
+How does this compare to your grouping? Are states ecoregions primarily grouped by temprature and precipitation? or are there likely other factors at play?
+
+```{r Clusters vs. Ecoregions}
+# create a data frame of Clusters vs. Ecoregions
+df <- data.frame(Cluster = My_State_scaled$Cluster,
+                 Ecoregion = My_State_scaled$Ecoregion)
+
+# Plot this as a bar graph
+ggplot(df, aes(x = as.factor(Cluster), fill = Ecoregion)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Cluster", y = "Count", fill = "Ecoregion") +
+  theme_minimal() +
+  geom_vline(xintercept = c(seq(1.5, k, 1)), linetype = "dashed")
+
+```
+
+Lets look at ecoregions and our groupings side by side
+```{r}
+p1 <-ggplot() +
+  geom_polygon(data = us_map, aes(x = long, y = lat, group = group), 
+               fill = "white", color = "black") +
+  geom_point(data = My_State, aes(x = Longitude, y = Latitude, fill = as.character(Cluster)), size = 3, shape = 21, stroke = 1.5) +
+  labs( 
+       x = "Longitude", y = "Latitude", fill = "Cluster") +
+  coord_quickmap(xlim = c(min(My_State$Longitude)-.5, max(My_State$Longitude)+.5), 
+                  ylim = c(min(My_State$Latitude)-.5, max(My_State$Latitude))+.5) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "none")
+
+p2 <- ggplot() +
+  geom_polygon(data = us_map, aes(x = long, y = lat, group = group), 
+               fill = "white", color = "black") +
+  geom_point(data = My_State, aes(x = Longitude, y = Latitude, fill = as.factor(Ecoregion)), size = 3, shape = 21, stroke = 1.5) +
+  labs( 
+       x = "Longitude", y = "Latitude", fill = "Ecoregion") +
+  coord_quickmap(xlim = c(min(My_State$Longitude)-.5, max(My_State$Longitude)+.5), 
+                  ylim = c(min(My_State$Latitude)-.5, max(My_State$Latitude))+.5) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "none",
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 4))
+
+plot_grid(p1, p2)
+```
