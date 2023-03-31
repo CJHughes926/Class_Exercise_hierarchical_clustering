@@ -37,7 +37,7 @@ rm(list=ls())
 
 #Choose a state and type it below!
 
-State <- #
+State <- zz
 
 My_State <- read.csv(paste0("./SamplePts/",State,"_Points.csv")) # load data from CSV file, choose your state here
 My_State <- subset(My_State, complete.cases(My_State) == T) # subset only complete cases (rows without any missing values)
@@ -71,9 +71,9 @@ Visualize the Distribution of your points in Envrionmental Space
 
 ```{r E Space}
 # Plot Bio 1 (Annual Temprature) and Bio 12 (Annual Precipitation) of these points
-ggplot(My_State, aes(My_State$bio01, My_State$bio12)) +
+ggplot(My_State, aes(My_State$bio01/10, My_State$bio12/10)) +
   geom_point() +
-  labs(y = "Precipitation (mm)", x = "Temprature (C)")
+  labs(y = "Precipitation", x = "Temprature (C)")
 ```
 Isolate and Scale your Environmental Variables
 
